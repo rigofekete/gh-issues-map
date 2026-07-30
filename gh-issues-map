@@ -26,8 +26,7 @@ while IFS=$'\t' read -r n state title; do
 
   mark=""
   if [ "$state" = "OPEN" ]; then
-    # PRD-titled issues are spec parents, not workable tickets
-    if [ -z "$open_blockers" ] && [[ ! "$title" =~ ^PRD: ]]; then
+    if [ -z "$open_blockers" ]; then
       mark="◀ FRONTIER"
       frontier+=("#$n $title")
     elif [ -n "$open_blockers" ]; then
