@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# issue-deps.sh — render the GitHub Issues dependency table + frontier for this repo.
+# Usage: scripts/issue-deps.sh   (run anywhere inside the repo)
+set -euo pipefail
+
+repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+
+# number|state|title per issue (gh issue list excludes PRs)
+issues=$(gh issue list --state all --limit 200 --json number,title,state \
+  --jq '.[] | "\(.number)\t\(.state)\t\(.title)"')
+
+[ -z "$issues" ] && { echo "no issues in $repo"; exit 0; }
+
+frontier=()
+rows=()
+
+while IFS=$'\t' read -r n state title; do
+  # blockers annotated: ✓ = closed (no longer gates)
+  blockers=$(gh api "repos/$repo/issues/$n/dependencies/blocked_by" \
+    --jq '[.[] | if .state == "open" then "#\(.number)" else "#\(.number)✓" end] | join(", ")' 2>/dev/null || true)
+  open_blockers=$(gh api "repos/$repo/issues/$n/dependencies/blocked_by" \
+    --jq '[.[] | select(.state == "open") | .number] | join(", #")' 2>/dev/null || true)
+
+  blocked_by="—"
+  [ -n "$blockers" ] && blocked_by="$blockers"
+
+  mark=""
+  if [ "$state" = "OPEN" ]; then
+    # PRD-titled issues are spec parents, not workable tickets
+    if [ -z "$open_blockers" ] && [[ ! "$title" =~ ^PRD: ]]; then
+      mark="◀ FRONTIER"
+      frontier+=("#$n $title")
+    elif [ -n "$open_blockers" ]; then
+      mark="waiting (#$open_blockers)"
+    fi
+  else
+    mark="done ✓"
+  fi
+
+  rows+=("$n|$state|$blocked_by|$mark|$title")
+done <<< "$issues"
+
+{
+  echo "repo: $repo"
+  echo
+  echo "#|state|blocked by|status|title"
+  echo "-|-|-|-|-"
+  printf '%s\n' "${rows[@]}"
+} | column -t -s '|'
+
+echo
+if [ ${#frontier[@]} -gt 0 ]; then
+  echo "Workable now:"
+  printf '  %s\n' "${frontier[@]}"
+else
+  echo "Frontier empty — everything blocked or done."
+fi
