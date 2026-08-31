@@ -10,20 +10,30 @@ colorize_table() {
   fi
 
   awk -v esc="$(printf '\033')" '
-    function color(code, text) { return esc "[" code "m" text esc "[0m" }
-    NR == 1 { print color("1;36", $0); next }
+    function color(code, text) { return esc "[" code "m" text esc "[37m" }
+    NR == 1 { print esc "[1;34m" $0 esc "[0m"; next }
     {
-      sub(/OPEN/, color("33", "OPEN"))
+      sub(/OPEN/, color("38;5;208", "OPEN"))
       sub(/CLOSED/, color("32", "CLOSED"))
+      gsub(/#[0-9]+/, color("31", "&"))
+      sub(/—/, color("31", "—"))
       sub(/◀ FRONTIER/, color("1;32", "◀ FRONTIER"))
       if (match($0, /waiting \([^)]*\)/)) {
         waiting = substr($0, RSTART, RLENGTH)
-        sub(/waiting \([^)]*\)/, color("33", waiting))
+        sub(/waiting \([^)]*\)/, color("38;5;208", waiting))
       }
-      sub(/done ✓/, color("2;32", "done ✓"))
-      print
+      sub(/done ✓/, color("32", "done ✓"))
+      print esc "[37m" $0 esc "[0m"
     }
   '
+}
+
+print_color() {
+  if [ ! -t 1 ] || [ -n "${NO_COLOR-}" ]; then
+    printf '%s\n' "$2"
+  else
+    printf '\033[%sm%s\033[0m\n' "$1" "$2"
+  fi
 }
 
 repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
@@ -86,8 +96,10 @@ echo
 
 echo
 if [ ${#frontier[@]} -gt 0 ]; then
-  echo "Workable now:"
-  printf '  %s\n' "${frontier[@]}"
+  print_color '1;34' 'Workable now'
+  for issue in "${frontier[@]}"; do
+    print_color '37' "  $issue"
+  done
 else
   echo "Frontier empty — everything blocked or done."
 fi
