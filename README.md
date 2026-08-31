@@ -27,8 +27,10 @@ none exist, it says the frontier is empty.
 
 ## Requirements
 
-- [`gh`](https://cli.github.com/) (GitHub CLI), authenticated
+- [`gh`](https://cli.github.com/) 2.95.0 or later, authenticated
 - `jq` and `column` (present on most Linux/macOS systems)
+
+Color is shown when writing to a terminal. Set `NO_COLOR=1` to disable it.
 
 The repo you run it in must use GitHub's issue dependency feature
 (Issue → "Blocks / Blocked by"). Without dependencies set, every open issue
@@ -99,6 +101,5 @@ Switch repos the usual `gh` way — `cd` into another repo, or set
 
 - Pulls up to 200 issues (open + closed). Bump `--limit` in the script for larger
   repos.
-- Calls the `repos/:owner/:repo/issues/:n/dependencies/blocked_by` API once per
-  issue, so big repos will be rate-limited eventually. Run it, grab the output,
-  move on.
+- Fetches issues and their blockers together, rather than requesting blockers
+  separately for every issue.

@@ -3,23 +3,59 @@
 # Usage: scripts/issue-deps.sh   (run anywhere inside the repo)
 set -euo pipefail
 
+colorize_table() {
+  if [ ! -t 1 ] || [ -n "${NO_COLOR-}" ]; then
+    cat
+    return
+  fi
+
+  awk -v esc="$(printf '\033')" '
+    function color(code, text) { return esc "[" code "m" text esc "[0m" }
+    NR == 1 { print color("1;36", $0); next }
+    {
+      sub(/OPEN/, color("33", "OPEN"))
+      sub(/CLOSED/, color("32", "CLOSED"))
+      sub(/◀ FRONTIER/, color("1;32", "◀ FRONTIER"))
+      if (match($0, /waiting \([^)]*\)/)) {
+        waiting = substr($0, RSTART, RLENGTH)
+        sub(/waiting \([^)]*\)/, color("33", waiting))
+      }
+      sub(/done ✓/, color("2;32", "done ✓"))
+      print
+    }
+  '
+}
+
 repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
-# number|state|title per issue (gh issue list excludes PRs)
-issues=$(gh issue list --state all --limit 200 --json number,title,state \
-  --jq '.[] | "\(.number)\t\(.state)\t\(.title)"')
+# Fetch issue data and dependencies together instead of making requests per issue.
+issues=$(gh issue list --state all --limit 200 --json number,title,state,blockedBy \
+  --jq '.[] | [
+    (.number | tostring),
+    .state,
+    .title,
+    ([.blockedBy.nodes[] | if .state == "OPEN" then "#\(.number)" else "#\(.number)✓" end] | join(", ")),
+    ([.blockedBy.nodes[] | select(.state == "OPEN") | (.number | tostring)] | join(", #")),
+    (.blockedBy.totalCount | tostring)
+  ] | join("\u001f")')
 
 [ -z "$issues" ] && { echo "no issues in $repo"; exit 0; }
 
 frontier=()
 rows=()
 
-while IFS=$'\t' read -r n state title; do
-  # blockers annotated: ✓ = closed (no longer gates)
-  blockers=$(gh api "repos/$repo/issues/$n/dependencies/blocked_by" \
-    --jq '[.[] | if .state == "open" then "#\(.number)" else "#\(.number)✓" end] | join(", ")' 2>/dev/null || true)
-  open_blockers=$(gh api "repos/$repo/issues/$n/dependencies/blocked_by" \
-    --jq '[.[] | select(.state == "open") | .number] | join(", #")' 2>/dev/null || true)
+while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count; do
+
+  # gh issue list includes at most 50 blocker nodes per issue.
+  if [ "$blocker_count" -gt 50 ]; then
+    fallback=$(gh api --paginate --slurp \
+      "repos/$repo/issues/$n/dependencies/blocked_by?per_page=100" \
+      --jq '[
+        ([.[][] | if .state == "open" then "#\(.number)" else "#\(.number)✓" end] | join(", ")),
+        ([.[][] | select(.state == "open") | (.number | tostring)] | join(", #"))
+      ] | join("\u001f")')
+    IFS=$'\x1f' read -r blockers open_blockers <<< "$fallback"
+  fi
 
   blocked_by="—"
   [ -n "$blockers" ] && blocked_by="$blockers"
@@ -39,13 +75,14 @@ while IFS=$'\t' read -r n state title; do
   rows+=("$n|$state|$blocked_by|$mark|$title")
 done <<< "$issues"
 
+echo "repo: $repo"
+echo
+
 {
-  echo "repo: $repo"
-  echo
   echo "#|state|blocked by|status|title"
   echo "-|-|-|-|-"
   printf '%s\n' "${rows[@]}"
-} | column -t -s '|'
+} | column -t -s '|' | colorize_table
 
 echo
 if [ ${#frontier[@]} -gt 0 ]; then
