@@ -9,10 +9,12 @@ colorize_table() {
     return
   fi
 
-  awk -v esc="$(printf '\033')" '
-    function color(code, text) { return esc "[" code "m" text esc "[38;2;211;208;216m" }
+  awk -v esc="$(printf '\033')" -v marker="$(printf '\034')" '
+    function color(code, text) { return esc "[" code "m" text esc "[0;38;2;211;208;216m" }
     NR == 1 { print esc "[1;38;2;92;150;230m" $0 esc "[0m"; next }
     {
+      if (match($0, /◀ FRONTIER[[:space:]]+/))
+        $0 = substr($0, 1, RSTART + RLENGTH - 1) marker substr($0, RSTART + RLENGTH)
       sub(/OPEN/, color("38;2;217;149;62", "OPEN"))
       sub(/CLOSED/, color("38;2;108;190;125", "CLOSED"))
       gsub(/#[0-9]+/, color("38;2;198;94;108", "&"))
@@ -23,6 +25,10 @@ colorize_table() {
         sub(/waiting \([^)]*\)/, color("38;2;217;149;62", waiting))
       }
       sub(/done ✓/, color("38;2;108;190;125", "done ✓"))
+      if (match($0, marker)) {
+        title = substr($0, RSTART + 1)
+        $0 = substr($0, 1, RSTART - 1) color("38;2;92;150;230", title)
+      }
       print esc "[38;2;211;208;216m" $0 esc "[0m"
     }
   '
