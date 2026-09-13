@@ -222,9 +222,9 @@ for t in "${PRD_ORDER[@]}"; do
     header+="   ⚠ no linked children"
   fi
   if [ "$fin" = 1 ]; then
-    print_color '1;38;2;120;130;150' "$header"
+    print_color '1;38;2;130;110;160' "$header"
   else
-    print_color '1;38;2;92;150;230' "$header"
+    print_color '1;38;2;163;113;247' "$header"
   fi
 
   kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ' || true)
@@ -258,7 +258,7 @@ if [ "${#FROWS[@]}" -eq 0 ]; then
 else
   for t in "${PRD_ORDER[@]}"; do
     [ -n "${FROWS[$t]:-}" ] || continue
-    print_color '38;2;150;160;180' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
+    print_color '38;2;150;125;220' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
     while IFS= read -r line; do
       [ -n "$line" ] && print_color '38;2;211;208;216' "    $line"
     done <<< "${FROWS[$t]}"
