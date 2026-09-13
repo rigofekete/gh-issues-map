@@ -9,9 +9,10 @@ Originally written to make sense of issue-driven projects that use GitHub's
 
 ## What it prints
 
-By default it groups issues by **PRD** — an issue that has sub-issues, or whose
-title starts with `PRD:`. Each PRD is rendered in ascending number order, with
-its child issues in ascending order beneath a header showing progress:
+By default it groups issues by **PRD** — an issue that has sub-issues, carries
+the `spec` label, or whose title starts with `PRD:`. Each PRD is rendered in
+ascending number order, with its child issues in ascending order beneath a
+header showing progress:
 
 ```
 PRD: Thread profile - shared recommendation graphs   (#18)   2/15 done
@@ -59,7 +60,8 @@ just shows as frontier.
 
 PRD grouping relies on GitHub's **real** sub-issue relationships
 (Issue → "Parent issue"), not on a `Parent: #N` line in the body — a text
-mention is not a sub-issue and will not group. To link an issue as a child:
+mention is not a sub-issue and will not group. A spec that has no tickets yet
+is still grouped if it carries the `spec` label. To link an issue as a child:
 
 ```sh
 gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues \

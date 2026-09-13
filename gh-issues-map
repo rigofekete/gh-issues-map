@@ -18,10 +18,11 @@ Usage:
   -h       Show this help.
 
 By default each PRD is rendered in ascending number order: an issue that has
-sub-issues, or whose title starts with "PRD:". A PRD header shows progress,
-then its child issues in ascending order. Fully closed PRDs are rendered in
-full with a muted "finished" palette. Parentless non-PRD issues appear under
-"Unassigned", and the "Workable now" frontier is grouped the same way.
+sub-issues, carries the `spec` label, or whose title starts with "PRD:". A PRD
+header shows progress, then its child issues in ascending order. Fully closed
+PRDs are rendered in full with a muted "finished" palette. Parentless non-PRD
+issues appear under "Unassigned", and the "Workable now" frontier is grouped
+the same way.
 EOF
       exit 0 ;;
     "") ;;
@@ -102,7 +103,7 @@ render_table() {
 repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
 # Fetch issue data and dependencies together instead of making requests per issue.
-raw=$(gh issue list --state all --limit 500 --json number,title,state,blockedBy,parent,subIssuesSummary \
+raw=$(gh issue list --state all --limit 500 --json number,title,state,blockedBy,parent,subIssuesSummary,labels \
   --jq '.[] | [
     (.number | tostring),
     .state,
@@ -112,17 +113,18 @@ raw=$(gh issue list --state all --limit 500 --json number,title,state,blockedBy,
     (.blockedBy.totalCount | tostring),
     (.parent.number // "" | tostring),
     (.subIssuesSummary.total | tostring),
-    (.subIssuesSummary.completed | tostring)
+    (.subIssuesSummary.completed | tostring),
+    ([.labels[].name] | join(","))
   ] | join("\u001f")')
 
 [ -z "$raw" ] && { echo "no issues in $repo"; exit 0; }
 
-declare -A STATE TITLE BLOCKERS PARENT SUBTOTAL SUBDONE MARK CHILDREN FROWS
+declare -A STATE TITLE BLOCKERS PARENT SUBTOTAL SUBDONE MARK CHILDREN FROWS LABELS
 PRD_ORDER=()
 UNASSIGNED=()
 all=()
 
-while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count parent sub_total sub_done; do
+while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count parent sub_total sub_done labels; do
   [ -z "$n" ] && continue
 
   # gh issue list includes at most 50 blocker nodes per issue.
@@ -142,6 +144,7 @@ while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count par
   PARENT[$n]=$parent
   SUBTOTAL[$n]=$sub_total
   SUBDONE[$n]=$sub_done
+  LABELS[$n]=$labels
   if [ -n "$parent" ]; then CHILDREN[$parent]+="$n "; fi
 
   if [ "$state" = "OPEN" ]; then
@@ -158,7 +161,12 @@ while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count par
 done <<< "$raw"
 
 row_for() { printf '%s|%s|%s|%s|%s' "$1" "${STATE[$1]}" "${BLOCKERS[$1]}" "${MARK[$1]}" "${TITLE[$1]}"; }
-is_prd() { [ "${SUBTOTAL[$1]:-0}" -gt 0 ] || [[ "${TITLE[$1]}" == PRD:* ]]; }
+is_prd() {
+  [ "${SUBTOTAL[$1]:-0}" -gt 0 ] && return 0
+  [[ "${TITLE[$1]}" == PRD:* ]] && return 0
+  [[ ",${LABELS[$1]:-}," == *,spec,* ]] && return 0
+  return 1
+}
 note_frontier() { if [ "${MARK[$1]}" = "◀ FRONTIER" ]; then FROWS[$2]+="#$1 ${TITLE[$1]}"$'\n'; fi; }
 
 all_sorted=$(printf '%s\n' "${all[@]}" | sort -n)
