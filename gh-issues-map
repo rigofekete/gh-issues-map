@@ -177,7 +177,7 @@ if [ "$FLAT" = 1 ]; then
   echo
   rows=()
   while IFS= read -r n; do
-    [ -n "$n" ] && rows+=("$(row_for "$n")")
+    if [ -n "$n" ]; then rows+=("$(row_for "$n")"); fi
   done <<< "$all_sorted"
   render_table 0 "${rows[@]}"
   echo
@@ -260,13 +260,13 @@ else
     [ -n "${FROWS[$t]:-}" ] || continue
     print_color '38;2;150;125;220' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
     while IFS= read -r line; do
-      [ -n "$line" ] && print_color '38;2;211;208;216' "    $line"
+      if [ -n "$line" ]; then print_color '38;2;211;208;216' "    $line"; fi
     done <<< "${FROWS[$t]}"
   done
   if [ -n "${FROWS[0]:-}" ]; then
     print_color '38;2;150;160;180' '  Unassigned'
     while IFS= read -r line; do
-      [ -n "$line" ] && print_color '38;2;211;208;216' "    $line"
+      if [ -n "$line" ]; then print_color '38;2;211;208;216' "    $line"; fi
     done <<< "${FROWS[0]}"
   fi
 fi
