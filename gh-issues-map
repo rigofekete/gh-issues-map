@@ -227,7 +227,7 @@ for t in "${PRD_ORDER[@]}"; do
     print_color '1;38;2;92;150;230' "$header"
   fi
 
-  kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ')
+  kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ' || true)
   kids=()
   if [ -n "$kid_list" ]; then read -ra kids <<< "$kid_list"; fi
   rows=()
