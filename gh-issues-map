@@ -1,35 +1,78 @@
 #!/usr/bin/env bash
-# issue-deps.sh — render the GitHub Issues dependency table + frontier for this repo.
-# Usage: scripts/issue-deps.sh   (run anywhere inside the repo)
+# gh-issues-map — render this repo's GitHub Issues as a PRD-grouped dependency map.
+# Usage: gh issues-map [--flat]
 set -euo pipefail
 
+FLAT=0
+for arg in "$@"; do
+  case "$arg" in
+    --flat) FLAT=1 ;;
+    -h|--help)
+      cat <<'EOF'
+gh-issues-map — dependency map of this repo's GitHub Issues, grouped by PRD.
+
+Usage:
+  gh issues-map [--flat]
+
+  --flat   Print one flat table sorted by issue number (the original view).
+  -h       Show this help.
+
+By default each PRD is rendered in ascending number order: an issue that has
+sub-issues, or whose title starts with "PRD:". A PRD header shows progress,
+then its child issues in ascending order. Fully closed PRDs are rendered in
+full with a muted "finished" palette. Parentless non-PRD issues appear under
+"Unassigned", and the "Workable now" frontier is grouped the same way.
+EOF
+      exit 0 ;;
+    "") ;;
+    *) echo "gh issues-map: unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# Colorize a plain `column -t` table read on stdin. $1 is 1 for a "finished"
+# (fully closed) group, which selects a muted palette.
 colorize_table() {
+  local fin="${1:-0}"
   if [ ! -t 1 ] || [ -n "${NO_COLOR-}" ]; then
     cat
     return
   fi
 
-  awk -v esc="$(printf '\033')" -v marker="$(printf '\034')" '
-    function color(code, text) { return esc "[" code "m" text esc "[0;38;2;211;208;216m" }
-    NR == 1 { print esc "[1;38;2;92;150;230m" $0 esc "[0m"; next }
+  awk -v esc="$(printf '\033')" -v marker="$(printf '\034')" -v fin="$fin" '
+    function color(code, text) { return esc "[" code "m" text reset }
+    BEGIN {
+      if (fin == 1) {
+        base = "38;2;118;122;132"; hdr = "1;38;2;120;130;150"
+        openc = "38;2;150;130;95"; closedc = "38;2;95;135;110"
+        refc = "38;2;150;110;120"; frontc = "1;38;2;95;135;110"
+        reset = esc "[0;38;2;118;122;132m"
+      } else {
+        base = "38;2;211;208;216"; hdr = "1;38;2;92;150;230"
+        openc = "38;2;217;149;62"; closedc = "38;2;108;190;125"
+        refc = "38;2;198;94;108"; frontc = "1;38;2;108;190;125"
+        reset = esc "[0;38;2;211;208;216m"
+      }
+      base_seq = esc "[" base "m"
+    }
+    NR == 1 { print esc "[" hdr "m" $0 esc "[0m"; next }
     {
       if (match($0, /◀ FRONTIER[[:space:]]+/))
         $0 = substr($0, 1, RSTART + RLENGTH - 1) marker substr($0, RSTART + RLENGTH)
-      sub(/OPEN/, color("38;2;217;149;62", "OPEN"))
-      sub(/CLOSED/, color("38;2;108;190;125", "CLOSED"))
-      gsub(/#[0-9]+/, color("38;2;198;94;108", "&"))
-      sub(/—/, color("38;2;198;94;108", "—"))
-      sub(/◀ FRONTIER/, color("1;38;2;108;190;125", "◀ FRONTIER"))
+      sub(/OPEN/, color(openc, "OPEN"))
+      sub(/CLOSED/, color(closedc, "CLOSED"))
+      gsub(/#[0-9]+/, color(refc, "&"))
+      sub(/—/, color(refc, "—"))
+      sub(/◀ FRONTIER/, color(frontc, "◀ FRONTIER"))
       if (match($0, /waiting \([^)]*\)/)) {
         waiting = substr($0, RSTART, RLENGTH)
-        sub(/waiting \([^)]*\)/, color("38;2;217;149;62", waiting))
+        sub(/waiting \([^)]*\)/, color(openc, waiting))
       }
-      sub(/done ✓/, color("38;2;108;190;125", "done ✓"))
+      sub(/done ✓/, color(closedc, "done ✓"))
       if (match($0, marker)) {
         title = substr($0, RSTART + 1)
-        $0 = substr($0, 1, RSTART - 1) color("38;2;92;150;230", title)
+        $0 = substr($0, 1, RSTART - 1) color(hdr, title)
       }
-      print esc "[38;2;211;208;216m" $0 esc "[0m"
+      print base_seq $0 esc "[0m"
     }
   '
 }
@@ -42,25 +85,45 @@ print_color() {
   fi
 }
 
+# Render rows ("#|state|blocked by|status|title") as an indented table.
+render_table() {
+  local fin="$1"; shift
+  if [ "$#" -eq 0 ]; then
+    printf '  (no issues)\n'
+    return
+  fi
+  {
+    printf '%s\n' '#|state|blocked by|status|title'
+    printf '%s\n' '-|-|-|-|-'
+    printf '%s\n' "$@"
+  } | column -t -s '|' | sed 's/^/  /' | colorize_table "$fin"
+}
+
 repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
 # Fetch issue data and dependencies together instead of making requests per issue.
-issues=$(gh issue list --state all --limit 200 --json number,title,state,blockedBy \
+raw=$(gh issue list --state all --limit 500 --json number,title,state,blockedBy,parent,subIssuesSummary \
   --jq '.[] | [
     (.number | tostring),
     .state,
     .title,
     ([.blockedBy.nodes[] | if .state == "OPEN" then "#\(.number)" else "#\(.number)✓" end] | join(", ")),
     ([.blockedBy.nodes[] | select(.state == "OPEN") | (.number | tostring)] | join(", #")),
-    (.blockedBy.totalCount | tostring)
+    (.blockedBy.totalCount | tostring),
+    (.parent.number // "" | tostring),
+    (.subIssuesSummary.total | tostring),
+    (.subIssuesSummary.completed | tostring)
   ] | join("\u001f")')
 
-[ -z "$issues" ] && { echo "no issues in $repo"; exit 0; }
+[ -z "$raw" ] && { echo "no issues in $repo"; exit 0; }
 
-frontier=()
-rows=()
+declare -A STATE TITLE BLOCKERS PARENT SUBTOTAL SUBDONE MARK CHILDREN FROWS
+PRD_ORDER=()
+UNASSIGNED=()
+all=()
 
-while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count; do
+while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count parent sub_total sub_done; do
+  [ -z "$n" ] && continue
 
   # gh issue list includes at most 50 blocker nodes per issue.
   if [ "$blocker_count" -gt 50 ]; then
@@ -73,39 +136,129 @@ while IFS=$'\x1f' read -r n state title blockers open_blockers blocker_count; do
     IFS=$'\x1f' read -r blockers open_blockers <<< "$fallback"
   fi
 
-  blocked_by="—"
-  [ -n "$blockers" ] && blocked_by="$blockers"
+  STATE[$n]=$state
+  TITLE[$n]=$title
+  BLOCKERS[$n]=${blockers:-—}
+  PARENT[$n]=$parent
+  SUBTOTAL[$n]=$sub_total
+  SUBDONE[$n]=$sub_done
+  if [ -n "$parent" ]; then CHILDREN[$parent]+="$n "; fi
 
-  mark=""
   if [ "$state" = "OPEN" ]; then
     if [ -z "$open_blockers" ]; then
-      mark="◀ FRONTIER"
-      frontier+=("#$n $title")
-    elif [ -n "$open_blockers" ]; then
-      mark="waiting (#$open_blockers)"
+      MARK[$n]="◀ FRONTIER"
+    else
+      MARK[$n]="waiting (#$open_blockers)"
     fi
   else
-    mark="done ✓"
+    MARK[$n]="done ✓"
   fi
 
-  rows+=("$n|$state|$blocked_by|$mark|$title")
-done <<< "$issues"
+  all+=("$n")
+done <<< "$raw"
+
+row_for() { printf '%s|%s|%s|%s|%s' "$1" "${STATE[$1]}" "${BLOCKERS[$1]}" "${MARK[$1]}" "${TITLE[$1]}"; }
+is_prd() { [ "${SUBTOTAL[$1]:-0}" -gt 0 ] || [[ "${TITLE[$1]}" == PRD:* ]]; }
+note_frontier() { if [ "${MARK[$1]}" = "◀ FRONTIER" ]; then FROWS[$2]+="#$1 ${TITLE[$1]}"$'\n'; fi; }
+
+all_sorted=$(printf '%s\n' "${all[@]}" | sort -n)
+
+# --- flat mode: original single table -------------------------------------
+if [ "$FLAT" = 1 ]; then
+  echo "repo: $repo"
+  echo
+  rows=()
+  while IFS= read -r n; do
+    [ -n "$n" ] && rows+=("$(row_for "$n")")
+  done <<< "$all_sorted"
+  render_table 0 "${rows[@]}"
+  echo
+  print_color '1;38;2;92;150;230' 'Workable now'
+  found=0
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    if [ "${MARK[$n]}" = "◀ FRONTIER" ]; then
+      print_color '38;2;211;208;216' "  #$n ${TITLE[$n]}"
+      found=1
+    fi
+  done <<< "$all_sorted"
+  [ "$found" = 0 ] && echo "  Frontier empty — everything blocked or done."
+  exit 0
+fi
+
+# --- grouped mode ----------------------------------------------------------
+for n in $all_sorted; do
+  if [ -z "${PARENT[$n]}" ]; then
+    if is_prd "$n"; then PRD_ORDER+=("$n"); else UNASSIGNED+=("$n"); fi
+  fi
+done
+# Orphans whose parent is missing from the repo.
+for n in "${all[@]}"; do
+  p="${PARENT[$n]}"
+  if [ -n "$p" ] && [ -z "${TITLE[$p]:-}" ]; then UNASSIGNED+=("$n"); fi
+done
 
 echo "repo: $repo"
 echo
 
-{
-  echo "#|state|blocked by|status|title"
-  echo "-|-|-|-|-"
-  printf '%s\n' "${rows[@]}"
-} | column -t -s '|' | colorize_table
+for t in "${PRD_ORDER[@]}"; do
+  total=${SUBTOTAL[$t]}
+  done_count=${SUBDONE[$t]}
+  fin=0
+  if [ "$total" -gt 0 ] && [ "$done_count" -eq "$total" ]; then fin=1; fi
 
-echo
-if [ ${#frontier[@]} -gt 0 ]; then
-  print_color '1;38;2;92;150;230' 'Workable now'
-  for issue in "${frontier[@]}"; do
-    print_color '38;2;211;208;216' "  $issue"
+  header="PRD: ${TITLE[$t]#PRD: }   (#$t)"
+  if [ "$total" -gt 0 ]; then
+    header+="   $done_count/$total done"
+  else
+    header+="   ⚠ no linked children"
+  fi
+  if [ "$fin" = 1 ]; then
+    print_color '1;38;2;120;130;150' "$header"
+  else
+    print_color '1;38;2;92;150;230' "$header"
+  fi
+
+  kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ')
+  kids=()
+  if [ -n "$kid_list" ]; then read -ra kids <<< "$kid_list"; fi
+  rows=()
+  for k in "${kids[@]}"; do
+    rows+=("$(row_for "$k")")
+    note_frontier "$k" "$t"
   done
+  render_table "$fin" "${rows[@]}"
+  echo
+done
+
+if [ "${#UNASSIGNED[@]}" -gt 0 ]; then
+  print_color '1;38;2;217;149;62' 'Unassigned'
+  un_sorted=$(printf '%s\n' "${UNASSIGNED[@]}" | sort -n)
+  rows=()
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    rows+=("$(row_for "$n")")
+    note_frontier "$n" 0
+  done <<< "$un_sorted"
+  render_table 0 "${rows[@]}"
+  echo
+fi
+
+print_color '1;38;2;92;150;230' 'Workable now'
+if [ "${#FROWS[@]}" -eq 0 ]; then
+  echo "  Frontier empty — everything blocked or done."
 else
-  echo "Frontier empty — everything blocked or done."
+  for t in "${PRD_ORDER[@]}"; do
+    [ -n "${FROWS[$t]:-}" ] || continue
+    print_color '38;2;150;160;180' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
+    while IFS= read -r line; do
+      [ -n "$line" ] && print_color '38;2;211;208;216' "    $line"
+    done <<< "${FROWS[$t]}"
+  done
+  if [ -n "${FROWS[0]:-}" ]; then
+    print_color '38;2;150;160;180' '  Unassigned'
+    while IFS= read -r line; do
+      [ -n "$line" ] && print_color '38;2;211;208;216' "    $line"
+    done <<< "${FROWS[0]}"
+  fi
 fi

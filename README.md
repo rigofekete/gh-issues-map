@@ -9,7 +9,25 @@ Originally written to make sense of issue-driven projects that use GitHub's
 
 ## What it prints
 
-For every issue in the repo, one row:
+By default it groups issues by **PRD** — an issue that has sub-issues, or whose
+title starts with `PRD:`. Each PRD is rendered in ascending number order, with
+its child issues in ascending order beneath a header showing progress:
+
+```
+PRD: Thread profile - shared recommendation graphs   (#18)   2/15 done
+  #   state   blocked by   status        title
+  19  CLOSED  —            done ✓        Thread Workspace bootstrap in OpenTUI
+  21  OPEN    —            ◀ FRONTIER    Safe offline and divergent Git sync
+  ...
+```
+
+- A fully closed PRD is still rendered in full, but with a muted "finished"
+  palette so it recedes next to active work.
+- A `PRD:` title with no linked sub-issues prints `⚠ no linked children`, so a
+  missing link is visible rather than silently dropped.
+- Parentless non-PRD issues appear under **Unassigned**.
+
+Each row has the columns:
 
 ```
 #  | state | blocked by        | status            | title
@@ -22,8 +40,11 @@ For every issue in the repo, one row:
   - `waiting (#N, …)` — open, but blocked by the listed open issues.
   - `done ✓` — closed.
 
-After the table it prints a `Workable now:` list of all frontier issues. If
-none exist, it says the frontier is empty.
+After the table it prints a `Workable now:` list of all frontier issues, grouped
+by PRD the same way. If none exist, it says the frontier is empty.
+
+Pass `--flat` for the original single table sorted by issue number (no PRD
+grouping), followed by a flat `Workable now:` list.
 
 ## Requirements
 
@@ -35,6 +56,16 @@ Color is shown when writing to a terminal. Set `NO_COLOR=1` to disable it.
 The repo you run it in must use GitHub's issue dependency feature
 (Issue → "Blocks / Blocked by"). Without dependencies set, every open issue
 just shows as frontier.
+
+PRD grouping relies on GitHub's **real** sub-issue relationships
+(Issue → "Parent issue"), not on a `Parent: #N` line in the body — a text
+mention is not a sub-issue and will not group. To link an issue as a child:
+
+```sh
+gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues \
+  -F sub_issue_id="$(gh api repos/<owner>/<repo>/issues/<child> --jq .id)"
+```
+
 
 ## Registering with `gh`
 
@@ -91,6 +122,8 @@ From anywhere inside the repo:
 
 ```sh
 gh issues-map
+gh issues-map --flat    # original single sorted table
+gh issues-map --help
 ```
 
 Switch repos the usual `gh` way — `cd` into another repo, or set
@@ -99,7 +132,7 @@ Switch repos the usual `gh` way — `cd` into another repo, or set
 
 ## Notes
 
-- Pulls up to 200 issues (open + closed). Bump `--limit` in the script for larger
+- Pulls up to 500 issues (open + closed). Bump `--limit` in the script for larger
   repos.
 - Fetches issues and their blockers together, rather than requesting blockers
   separately for every issue.
