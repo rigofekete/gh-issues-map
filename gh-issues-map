@@ -43,12 +43,12 @@ colorize_table() {
     function color(code, text) { return esc "[" code "m" text reset }
     BEGIN {
       if (fin == 1) {
-        base = "38;2;118;122;132"; hdr = "1;38;2;120;130;150"
+        base = "38;2;118;122;132"; hdr = "1;38;2;130;110;160"; titlec = "1;38;2;120;130;150"
         openc = "38;2;150;130;95"; closedc = "38;2;95;135;110"
         refc = "38;2;150;110;120"; frontc = "1;38;2;95;135;110"
         reset = esc "[0;38;2;118;122;132m"
       } else {
-        base = "38;2;211;208;216"; hdr = "1;38;2;92;150;230"
+        base = "38;2;211;208;216"; hdr = "1;38;2;163;113;247"; titlec = "1;38;2;92;150;230"
         openc = "38;2;217;149;62"; closedc = "38;2;108;190;125"
         refc = "38;2;198;94;108"; frontc = "1;38;2;108;190;125"
         reset = esc "[0;38;2;211;208;216m"
@@ -71,7 +71,7 @@ colorize_table() {
       sub(/done ✓/, color(closedc, "done ✓"))
       if (match($0, marker)) {
         title = substr($0, RSTART + 1)
-        $0 = substr($0, 1, RSTART - 1) color(hdr, title)
+        $0 = substr($0, 1, RSTART - 1) color(titlec, title)
       }
       print base_seq $0 esc "[0m"
     }
@@ -222,9 +222,9 @@ for t in "${PRD_ORDER[@]}"; do
     header+="   ⚠ no linked children"
   fi
   if [ "$fin" = 1 ]; then
-    print_color '1;38;2;130;110;160' "$header"
+    print_color '1;38;2;120;130;150' "$header"
   else
-    print_color '1;38;2;163;113;247' "$header"
+    print_color '1;38;2;92;150;230' "$header"
   fi
 
   kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ' || true)
@@ -258,7 +258,7 @@ if [ "${#FROWS[@]}" -eq 0 ]; then
 else
   for t in "${PRD_ORDER[@]}"; do
     [ -n "${FROWS[$t]:-}" ] || continue
-    print_color '38;2;150;125;220' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
+    print_color '38;2;150;160;180' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
     while IFS= read -r line; do
       if [ -n "$line" ]; then print_color '38;2;211;208;216' "    $line"; fi
     done <<< "${FROWS[$t]}"
