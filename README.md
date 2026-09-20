@@ -51,6 +51,17 @@ by PRD the same way. If none exist, it says the frontier is empty.
 Pass `--flat` for the original single table sorted by issue number (no PRD
 grouping), followed by a flat `Workable now:` list.
 
+## Testing
+
+```sh
+./test.sh
+```
+
+Runs the script against a stub `gh` and a fixture repo — no network and no real
+repository — and asserts the rendered map, including that nested PRDs keep their
+children and their place in the frontier. Exits non-zero on the first failure
+and prints the output it got.
+
 ## Requirements
 
 - [`gh`](https://cli.github.com/) 2.95.0 or later, authenticated
