@@ -87,17 +87,18 @@ print_color() {
 }
 
 # Render rows ("#|state|blocked by|status|title") as an indented table.
+# $1 = 1 for the muted "finished" palette; $2 = leading indent in spaces.
 render_table() {
-  local fin="$1"; shift
+  local fin="$1" ind="$2"; shift 2
   if [ "$#" -eq 0 ]; then
-    printf '  (no issues)\n'
+    printf '%*s(no issues)\n' "$ind" ''
     return
   fi
   {
     printf '%s\n' '#|state|blocked by|status|title'
     printf '%s\n' '-|-|-|-|-'
     printf '%s\n' "$@"
-  } | column -t -s '|' | sed 's/^/  /' | colorize_table "$fin"
+  } | column -t -s '|' | sed "s/^/$(printf '%*s' "$ind" '')/" | colorize_table "$fin"
 }
 
 repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
@@ -179,7 +180,7 @@ if [ "$FLAT" = 1 ]; then
   while IFS= read -r n; do
     if [ -n "$n" ]; then rows+=("$(row_for "$n")"); fi
   done <<< "$all_sorted"
-  render_table 0 "${rows[@]}"
+  render_table 0 2 "${rows[@]}"
   echo
   print_color '1;38;2;92;150;230' 'Workable now'
   found=0
@@ -195,27 +196,30 @@ if [ "$FLAT" = 1 ]; then
 fi
 
 # --- grouped mode ----------------------------------------------------------
-for n in $all_sorted; do
-  if [ -z "${PARENT[$n]}" ]; then
-    if is_prd "$n"; then PRD_ORDER+=("$n"); else UNASSIGNED+=("$n"); fi
-  fi
-done
-# Orphans whose parent is missing from the repo.
-for n in "${all[@]}"; do
-  p="${PARENT[$n]}"
-  if [ -n "$p" ] && [ -z "${TITLE[$p]:-}" ]; then UNASSIGNED+=("$n"); fi
-done
+# A PRD is an issue with sub-issues, the `spec` label, or a "PRD:" title. A PRD
+# can itself be a sub-issue (a spec nested under another spec), so grouping
+# recurses: each PRD renders its children, and any child that is itself a PRD
+# renders its own group beneath it, indented one level.
+declare -A RENDERED IND
+PRD_ORDER=()
+UNASSIGNED_PRD=()
 
-echo "repo: $repo"
-echo
+pad() { printf '%*s' "$1" ''; }
 
-for t in "${PRD_ORDER[@]}"; do
-  total=${SUBTOTAL[$t]}
-  done_count=${SUBDONE[$t]}
-  fin=0
+# render_group <issue> <indent>
+render_group() {
+  local t="$1" ind="$2"
+  [ -n "${TITLE[$t]:-}" ] || return 0
+  [ -n "${RENDERED[$t]:-}" ] && return 0   # cycle / already rendered
+  RENDERED[$t]=1
+  IND[$t]=$ind
+  PRD_ORDER+=("$t")
+
+  local total=${SUBTOTAL[$t]} done_count=${SUBDONE[$t]} fin=0
   if [ "$total" -gt 0 ] && [ "$done_count" -eq "$total" ]; then fin=1; fi
 
-  header="PRD: ${TITLE[$t]#PRD: }   (#$t)"
+  local header
+  header="$(pad $((ind * 2)))PRD: ${TITLE[$t]#PRD: }   (#$t)"
   if [ "$total" -gt 0 ]; then
     header+="   $done_count/$total done"
   else
@@ -227,16 +231,34 @@ for t in "${PRD_ORDER[@]}"; do
     print_color '1;38;2;92;150;230' "$header"
   fi
 
+  local kid_list kids=() rows=()
   kid_list=$(printf '%s\n' ${CHILDREN[$t]:-} | grep -v '^$' | sort -n | tr '\n' ' ' || true)
-  kids=()
   if [ -n "$kid_list" ]; then read -ra kids <<< "$kid_list"; fi
-  rows=()
   for k in "${kids[@]}"; do
     rows+=("$(row_for "$k")")
     note_frontier "$k" "$t"
   done
-  render_table "$fin" "${rows[@]}"
+  render_table "$fin" $((2 + ind * 2)) "${rows[@]}"
   echo
+
+  # Child PRDs nest beneath their parent's table.
+  for k in "${kids[@]}"; do
+    if is_prd "$k"; then render_group "$k" $((ind + 1)); fi
+  done
+}
+
+echo "repo: $repo"
+echo
+
+for n in $all_sorted; do
+  if [ -z "${PARENT[$n]}" ]; then
+    if is_prd "$n"; then render_group "$n" 0; else UNASSIGNED+=("$n"); fi
+  fi
+done
+# Orphans whose parent is missing from the repo.
+for n in "${all[@]}"; do
+  p="${PARENT[$n]}"
+  if [ -n "$p" ] && [ -z "${TITLE[$p]:-}" ]; then UNASSIGNED+=("$n"); fi
 done
 
 if [ "${#UNASSIGNED[@]}" -gt 0 ]; then
@@ -245,11 +267,18 @@ if [ "${#UNASSIGNED[@]}" -gt 0 ]; then
   rows=()
   while IFS= read -r n; do
     [ -n "$n" ] || continue
+    if is_prd "$n" && [ -z "${RENDERED[$n]:-}" ]; then
+      UNASSIGNED_PRD+=("$n")
+      continue
+    fi
     rows+=("$(row_for "$n")")
     note_frontier "$n" 0
   done <<< "$un_sorted"
-  render_table 0 "${rows[@]}"
+  render_table 0 2 "${rows[@]}"
   echo
+  for n in "${UNASSIGNED_PRD[@]:-}"; do
+    [ -n "$n" ] && render_group "$n" 0
+  done
 fi
 
 print_color '1;38;2;92;150;230' 'Workable now'
@@ -258,9 +287,10 @@ if [ "${#FROWS[@]}" -eq 0 ]; then
 else
   for t in "${PRD_ORDER[@]}"; do
     [ -n "${FROWS[$t]:-}" ] || continue
-    print_color '38;2;150;160;180' "  PRD: ${TITLE[$t]#PRD: } (#$t)"
+    p=$(pad $((2 + 2 * ${IND[$t]:-0})))
+    print_color '38;2;150;160;180' "${p}PRD: ${TITLE[$t]#PRD: } (#$t)"
     while IFS= read -r line; do
-      if [ -n "$line" ]; then print_color '38;2;211;208;216' "    $line"; fi
+      if [ -n "$line" ]; then print_color '38;2;211;208;216' "${p}  $line"; fi
     done <<< "${FROWS[$t]}"
   done
   if [ -n "${FROWS[0]:-}" ]; then

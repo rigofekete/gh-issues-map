@@ -26,6 +26,10 @@ PRD: Thread profile - shared recommendation graphs   (#18)   2/15 done
   palette so it recedes next to active work.
 - A `PRD:` title with no linked sub-issues prints `⚠ no linked children`, so a
   missing link is visible rather than silently dropped.
+- **Nested PRDs render in place.** A PRD that is itself a sub-issue (a spec
+  hanging under another spec) is grouped under its parent and indented one
+  level, and its own children are rendered beneath it — recursively, to any
+  depth. Its frontier issues roll up into the parent's `Workable now` list.
 - Parentless non-PRD issues appear under **Unassigned**.
 
 Each row has the columns:
